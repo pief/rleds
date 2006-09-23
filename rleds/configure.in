@@ -1,0 +1,36 @@
+#
+# rleds - Router LED control program
+# Copyright (c) 2006 by Pieter Hollants <pieter@hollants.com>
+#
+# This software is licensed under the GNU General Public License, version 2,
+# as published by the Free Software Foundation and available in the file
+# COPYING and the Internet location http://www.gnu.org/licenses/gpl.html.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.
+#
+
+# Initialization macros
+AC_INIT(rleds, 0.1)
+
+# Checks for programs.
+AC_PROG_CC
+AC_CHECK_PROGS(MAKE, [gmake make])
+AC_CHECK_TOOL(AR, ar)
+AC_CHECK_TOOL(RANLIB, ranlib, :)
+AC_PATH_PROG(RM, rm, rm)
+AC_PROG_INSTALL
+
+# Checks for header files.
+AC_HEADER_STDC
+
+# If this is GCC, enable as many warnings as possible
+if test "x$GCC" = "xyes"; then
+        CFLAGS="$CFLAGS -Wall"
+fi
+
+# Generate output
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT
+
