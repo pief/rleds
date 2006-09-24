@@ -11,17 +11,22 @@
 # or FITNESS FOR A PARTICULAR PURPOSE.
 #
 
-VERSION = 0.1
+PACKAGE_NAME = @PACKAGE_NAME@
+PACKAGE_VERSION = @PACKAGE_VERSION@
 
 CC = @CC@
+CFLAGS = @CFLAGS@ -DPACKAGE_NAME=\"$(PACKAGE_NAME)\" -DPACKAGE_VERSION=\"$(PACKAGE_VERSION)\"
 
 all: rleds
 
 rleds.o: rleds.h
 
+.c.o:
+	$(CC) $(CFLAGS) -c $< -o $@
+
 clean:
 	-rm -rf *.o rleds
 
 release: all
-	-rm rleds-$(VERSION).tar.bz2
-	tar cvjf rleds-$(VERSION).tar.bz2 rleds *.c README
+	-rm rleds-$(PACKAGE_VERSION).tar.bz2
+	tar cvjf rleds-$(PACKAGE_VERSION).tar.bz2 rleds *.c README
