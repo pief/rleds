@@ -28,5 +28,5 @@ clean:
 	-rm -rf *.o rleds
 
 release: all
-	-rm rleds-$(PACKAGE_VERSION).tar.bz2
+	@[ -f rleds-$(PACKAGE_VERSION).tar.bz2 ] && rm rleds-$(PACKAGE_VERSION).tar.bz2
 	tar cvjf rleds-$(PACKAGE_VERSION).tar.bz2 rleds *.c README
