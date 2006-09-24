@@ -27,6 +27,18 @@ rleds.o: rleds.h
 clean:
 	-rm -rf *.o rleds
 
-release: all
-	@[ -f rleds-$(PACKAGE_VERSION).tar.bz2 ] && rm rleds-$(PACKAGE_VERSION).tar.bz2
-	tar cvjf rleds-$(PACKAGE_VERSION).tar.bz2 rleds *.c README
+release:
+	@SRCDIR=`pwd`; \
+	TMPDIR=`mktemp -d /tmp/rleds.XXXX`; \
+	cd $${TMPDIR}; \
+	mkdir rleds-$(PACKAGE_VERSION); \
+	cp -a $${SRCDIR}/rleds.[ch] \
+	      $${SRCDIR}/configure.in \
+	      $${SRCDIR}/configure \
+	      $${SRCDIR}/Makefile.in \
+	      $${SRCDIR}/README \
+	      rleds-$(PACKAGE_VERSION)/; \
+	[ -f $${SRCDIR}/rleds-$(PACKAGE_VERSION).tar.bz2 ] && rm $${SRCDIR}/rleds-$(PACKAGE_VERSION).tar.bz2; \
+	tar cvjf $${SRCDIR}/rleds-$(PACKAGE_VERSION).tar.bz2 rleds-$(PACKAGE_VERSION); \
+	cd $${SRCDIR}; \
+	rm -rf $${TMPDIR}
