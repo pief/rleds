@@ -17,10 +17,6 @@ AC_INIT(rleds, 0.1)
 # Checks for programs.
 AC_PROG_CC
 AC_CHECK_PROGS(MAKE, [gmake make])
-AC_CHECK_TOOL(AR, ar)
-AC_CHECK_TOOL(RANLIB, ranlib, :)
-AC_PATH_PROG(RM, rm, rm)
-AC_PROG_INSTALL
 
 # Checks for header files.
 AC_HEADER_STDC
