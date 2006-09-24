@@ -1,0 +1,144 @@
+
+                     rleds - Router LED control program
+          Copyright (c) 2006 by Pieter Hollants <pieter@hollants.com>
+
+
+LEGAL
+=====
+
+This program is licensed under the GNU General Public License, version 2,
+as published by the Free Software Foundation and available in the file
+COPYING and the Internet location http://www.gnu.org/licenses/gpl.html.
+
+This program and the information below is distributed in the hope that it will
+be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+PURPOSE
+=======
+
+rleds aims at reproducing the activity LEDs in hardware routers: it watches
+network interfaces for their status and activity and accordingly drives a
+number of LEDs connected to a parallel port.
+
+Obviously this involves hardware work and is only of interest to those who build
+a router based on PC components and are willing to do some "modding" work, i.e.
+drill holes in the case and glue or by other means attach LEDs in it. Additional
+information can be found in the HARDWARE section below.
+
+In detail, rleds works like this:
+- when a specified interface is up, its LED is turned on
+- when there's activity on an interface, its LED blinks (i.e. it is turned off
+  and back on periodically)
+
+Planned for those who employ tri-state LEDs (green/yellow recommended):
+- for Ethernet devices, light green only if 100MBit Full-Duplex and yellow
+  otherwise.
+- for WLAN devices, light green ordinarily and blink in slower rhythm wenn a
+  station (dis)associates
+- for PPP devices, light yellow when there is a connection, blink yellow when
+  a connection attempt is currently made and light green otherwise
+- for VPN devices, light yellow when the tunnel is actually up and green otherwise
+
+The color usage will probably be made swappable.
+
+Note that while the whole functionality could be realized as a kernel module, there
+is no real reason to do so. Everything that can be done in user space is mostly
+always better off there as well.
+
+REQUIREMENTS
+============
+
+For the hardware, see below. As regards software, a recent 2.6.x kernel is required
+because /sys/class/net files are watched.
+
+HARDWARE
+========
+
+CAUTION: all information provided below comes WITHOUT WARRANTY OF ANY KIND. Do NOT
+         try to follow the concepts illustrated below unless you have suitable
+         electronics damage -- you CAN damage your hardware rather easily and/or
+         probably also harm yourself!
+
+The parallel port is predestined because it provides 8 bi-directional data lines
+at 5V. This, together with GROUND, allows for 8 bi-directional LEDs or 4 tri-state
+LEDs (not yet supported). If necessary, the 4 writable control lines can be used
+additionally.
+
+Please note that IF you intend to pursue such a little hardware project, you can
+NOT just connect ANY type of LEDs. First of all, LEDs usually _MUST_ have a
+suitable resistor connected in series that limits the current run through it.
+Without the resistor the LED will burn through in a matter of seconds. Go read
+[1] for additional information why. That source explains electronics very well.
+
+Now on the other hand the old parallel port, before the age of ECP etc., wasn't
+able to source much current, mostly around 2mA per line, which is way below the
+maximum allowed current and not enough to make the LED really light up. If you
+happen to find such a port, you would need to collect power from multiple lines
+to get enough current, as illustrated in [2].
+
+Modern parallel ports seem to be able to source up to 10mA, which is enough
+to drive low-current LEDs and theoretically eliminates the need for extra resistors.
+You might even be able to drive ordinary LEDs, which require 20mA.
+
+However, the problem is: you can't really tell how much power YOUR particular
+parallel port can source. You MIGHT render it unusable if you overload it, so
+think twice before you really forget about the resistors!
+
+You're probably better off employing a parallel port extension card that is more
+easily replacabed than the entire mainboard. Plus, ordinary motherboards don't
+provide an internal connector as in pre-ATX times but have the port readily equipped
+on their ATX bracket. Whereas a 2-port parallel port card most probably has such a
+connector (since there's not enough room for 2 25-pin parallel ports on a single
+expansion slot bracket) which you may use for clean case-internal wiring.
+
+In my case, I employ a VIA EPIA MII board for the router, which happens to provide
+the parallel and serial ports through internal connectors, so my whole wiring was
+just rather easy.
+
+Also note that the data lines have one advantage compared to the control lines in
+that at least on my system on power-up all LEDs light up until after the POST. So
+they're off during the boot process and then only turn on again when enabled by
+rleds. Whereas the control lines (whose control register is also partially
+active-low, in other words, inverted, e.g. writing a 1 actually clears the LED
+whereas 0 enables it) after POST might partially remain enabled until rleds is
+started.
+
+Last not least please note that the brightness of the LEDs during the POST is
+NOT representative. The LEDs seem to be driven with a lower voltage initially,
+after POST, when rleds enables the LEDs, they will light brighter, at least
+on my board.
+
+USAGE
+=====
+
+Just start rleds and specify the interfaces to be watched (up to 8, at least
+one interface must be specified, otherwise rleds will refuse to work).
+
+rleds currently does not go into background itself. You might use startproc
+or similar tools for that purpose. When killed, rleds will turn off all LEDs,
+so they can be more relied upon.
+
+CONTACT
+=======
+
+If you have any questions, feel free to contact me at pieter <at> hollants.com.
+There is no webpage yet, one might appear at http://www.hollants.com/rleds.html
+sooner or later.
+
+CREDITS
+=======
+
+rleds was inspired - not in code, but by means of the idea - by tleds ([3]),
+which visualizes network traffic for a single interface on keyboard LEDs.
+
+Parallel port programming information was obtained from Tim Waugh's guide to
+the Linux parallel port subsystem ([4]).
+
+REFERENCES
+==========
+
+[1]: http://www.ibiblio.org/obp/electricCircuits/
+[2]: http://www.epanorama.net/circuits/lptpower.html
+[3]: http://users.tkk.fi/~jlohikos/tleds/
+[4]: http://people.redhat.com/twaugh/parport/html/parportguide.html
