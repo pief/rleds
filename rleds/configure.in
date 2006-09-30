@@ -12,7 +12,7 @@
 #
 
 # Initialization macros
-AC_INIT(rleds, 0.1)
+AC_INIT(rleds, 0.2)
 
 # Checks for programs.
 AC_PROG_CC
