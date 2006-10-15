@@ -12,11 +12,12 @@
 #
 
 # Initialization macros
-AC_INIT(rleds, 0.2)
+AC_INIT(rleds, 0.2, pieter@hollants.com)
+AC_CONFIG_HEADERS(config.h)
 
 # Checks for programs.
 AC_PROG_CC
-AC_CHECK_PROGS(MAKE, [gmake make])
+AC_PROG_RANLIB
 
 # Checks for header files.
 AC_HEADER_STDC
@@ -29,4 +30,3 @@ fi
 # Generate output
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
-
