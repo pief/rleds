@@ -81,9 +81,6 @@ typedef struct _leddriver
 	RC		(*init)(char *dev);		/* Init function. Called once to open and initialize
 							   "dev". */
 
-	void		(*shutdown)(void);		/* Shutdown function. Do any cleanup at program exit here.
-							   Set to NULL if not needed. */
-
 	void		(*enable)(PIN *pin);		/* Specifies a pin to be enabled by the commit() call. */
 	RC		(*commit)(void);		/* Enables the pins specified by calls to set() before. */
 	RC		(*reset)(void);			/* Reset (i.e. turn off all pins) */
