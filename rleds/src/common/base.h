@@ -23,7 +23,7 @@
 /*
 ** We stick to the usual programming convention (at least on unix) that a return
 ** code of zero indicates success and non-zero codes indicate failure. However, we
-** wrap this convention around the definition of a "RC" type. It's just "nicer"
+** wrap this convention in a definition of a "RC" type. It's just "nicer"
 ** and allows for stricter return type checking by the compiler.
 */
 #undef RC
