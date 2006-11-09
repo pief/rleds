@@ -11,34 +11,59 @@
 # or FITNESS FOR A PARTICULAR PURPOSE.
 #
 
-PACKAGE_NAME = @PACKAGE_NAME@
-PACKAGE_VERSION = @PACKAGE_VERSION@
+prefix = @prefix@
+exec_prefix = @exec_prefix@
+libdir = @libdir@
+
+PACKAGE_LIBDIR = ${libdir}/@PACKAGE_TARNAME@/@PACKAGE_VERSION@
 
 CC = @CC@
-CFLAGS = @CFLAGS@ -DPACKAGE_NAME=\"$(PACKAGE_NAME)\" -DPACKAGE_VERSION=\"$(PACKAGE_VERSION)\"
+RANLIB = @RANLIB@
 
-all: rleds
+CFLAGS = @CFLAGS@
+LDFLAGS = @LDFLAGS@
 
-rleds.o: rleds.h
+DEFS = @DEFS@ -DPACKAGE_LIBDIR=\"$(PACKAGE_LIBDIR)\"
+LIBS = @LIBS@ -ldl
 
-.c.o:
-	$(CC) $(CFLAGS) -c $< -o $@
+###############################################################################
+
+SUBDIRS = src/leddrivers src/ifhandlers src/rleds
+
+all:
+	@for dir in $(SUBDIRS); do \
+	  (cd $$dir; $(MAKE) all); \
+	done
+
+install:
+	@for dir in $(SUBDIRS); do \
+	  (cd $$dir; $(MAKE) install); \
+	done
 
 clean:
-	-rm -rf *.o rleds
+	@for dir in $(SUBDIRS); do \
+	  (cd $$dir; $(MAKE) clean); \
+	done
+
+distclean: clean
+	@[ -e rleds*.tar.bz2 ] && rm rleds*.tar.bz2 || true
+	@find . -name config.\* -a ! -name config.h.in -exec rm {} \; , -name Makefile -exec rm {} \;
+
+###############################################################################
+
+DISTDIR = @PACKAGE_TARNAME@-@PACKAGE_VERSION@
 
 release:
 	@SRCDIR=`pwd`; \
 	TMPDIR=`mktemp -d /tmp/rleds.XXXX`; \
 	cd $${TMPDIR}; \
-	mkdir rleds-$(PACKAGE_VERSION); \
-	cp -a $${SRCDIR}/rleds.[ch] \
-	      $${SRCDIR}/configure.in \
-	      $${SRCDIR}/configure \
-	      $${SRCDIR}/Makefile.in \
-	      $${SRCDIR}/README \
-	      rleds-$(PACKAGE_VERSION)/; \
-	[ -f $${SRCDIR}/rleds-$(PACKAGE_VERSION).tar.bz2 ] && rm $${SRCDIR}/rleds-$(PACKAGE_VERSION).tar.bz2; \
-	tar cvjf $${SRCDIR}/rleds-$(PACKAGE_VERSION).tar.bz2 rleds-$(PACKAGE_VERSION); \
+	mkdir $(DISTDIR); \
+	cp -a $${SRCDIR}/* $(DISTDIR)/; \
+	cd $(DISTDIR); \
+	make distclean; \
+	find . -name .svn -type d -exec rm -rf {} +; \
+	cd ..; \
+	tar cvjf $${SRCDIR}/$(DISTDIR).tar.bz2 $(DISTDIR); \
 	cd $${SRCDIR}; \
 	rm -rf $${TMPDIR}
+

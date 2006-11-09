@@ -1,0 +1,47 @@
+#
+# rleds - Router LED control program
+# Copyright (c) 2006 by Pieter Hollants <pieter@hollants.com>
+#
+# This software is licensed under the GNU General Public License, version 2,
+# as published by the Free Software Foundation and available in the file
+# COPYING and the Internet location http://www.gnu.org/licenses/gpl.html.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# Makefile for interface handlers
+#
+
+prefix = @prefix@
+exec_prefix = @exec_prefix@
+libdir = @libdir@
+
+PACKAGE_LIBDIR = ${libdir}/@PACKAGE_TARNAME@/@PACKAGE_VERSION@
+
+CC = @CC@
+RANLIB = @RANLIB@
+
+DEFS = @DEFS@
+LIBS = @LIBS@
+
+CFLAGS = @CFLAGS@ @DEFS@ -fPIC
+LDFLAGS = @LDFLAGS@ -shared -g
+
+###############################################################################
+
+TARGETS = ifh_generic.so
+
+all: $(TARGETS)
+
+ifh_generic.so: ../common/base.h ../common/ifhandlers.h ../common/leds.h ifh_generic.h
+
+%.so: %.o
+	$(CC) $(LDFLAGS) -o $@ $<
+
+install:
+	mkdir -p $(PACKAGE_LIBDIR)
+	cp -a $(TARGETS) $(PACKAGE_LIBDIR)/
+
+clean:
+	-rm -rf *.o *.so
