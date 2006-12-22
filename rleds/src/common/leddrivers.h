@@ -31,26 +31,13 @@
 #define LEDDRIVER_PREFIX "leddrvr_"
 
 /*
-** A PIN structure defines a particular pin, existing at some port, which
-** is controlled by a LED driver. More precisely, it associates a user-space
-** exposed name with two integer values that are used within the LED driver
-** exclusively, indicating which value is to be written into which register.
-** The main program only uses the "allocated" flag.
+** LED drivers usually need to keep state information about the ports they access.
+** For this purpose they must declare a PORT structure, whose actual declaration is done
+** in the LED driver's header file, and is accessed in the main program only as a handle
+** (PORT = port handle). The typedef, however, must be done here since it's referenced in
+** the callback definitions below.
 */
-typedef struct _pin
-{
-	char		*name;				/* Name of the pin */
-	BOOL		allocated;			/* Pin already allocated? */
-
-	uint		reg,				/* Register (use your own #defines) */
-			val;				/* Value to write into register (= 2^pin) */
-} PIN;
-
-/* Macro to initialize a PIN array */
-#define INIT_PIN(n,r,v) { n, FALSE, r, v }
-
-/* Macro to terminate a PIN array */
-#define END_PINS { NULL, FALSE, 0, 0 }
+typedef struct _port PORT;
 
 /*
 ** Defining structure for LED drivers. These actually access the hardware by
@@ -68,6 +55,8 @@ typedef struct _pin
 */
 typedef struct _leddriver
 {
+	/* == Read-only information about the LED driver == */
+
 	int		api_ver;			/* API version implemented by this LED driver.
 							   (Always use LEDDRIVER_API_VER as defined above). */
 
@@ -75,17 +64,77 @@ typedef struct _leddriver
 			*ver;				/* Version of the LED driver */
 
 	char		*def_dev;			/* Default device */
-	PIN		*pins;				/* Array of pins controlled by this driver */
+	char		**pins;				/* Array of pin names controlled by this driver */
 
-	/* Callback functions implemented by LED drivers */
-	RC		(*init)(char *dev);		/* Init function. Called once to open and initialize
-							   "dev". */
+	/* == Callback functions == */
 
-	void		(*enable)(PIN *pin);		/* Specifies a pin to be enabled by the commit() call. */
-	RC		(*commit)(void);		/* Enables the pins specified by calls to set() before. */
-	RC		(*reset)(void);			/* Reset (i.e. turn off all pins) */
+	/*
+	** Initialization function.
+	**
+	** "dev" is the port to open (may be NULL, then "def_dev" will be used).
+	**
+	** Returns a PORT handle on success or NULL on failure.
+	**/
+	PORT		*(*init)(char *dev);
 
-	char		*(*errmsg)(void);		/* Returns driver-internal error messages */
+	/*
+	** Shutdown function.
+	**
+	** "port" is a PORT handle as obtained by a call to this LED driver's init() function.
+	**
+	** Returns OK on success and ERR on failure, in which case the program's error code should
+	** be set appropriately.
+	*/
+	RC		(*shutdown)(PORT *port);
+
+	/*
+	** Requests the LED driver to allocate the specified pin in the given PORT instance (ie.
+	** mark it as in use).
+	**
+	** "port" is a PORT handle as obtained by a call to this LED driver's init() function.
+	** "pin" is one of the pins listed in the LED driver's "pins" array.
+	**
+	** Returns OK on success and ERR on failure.
+	*/
+	RC		(*alloc)(PORT *port, char *pin);
+
+	/*
+	** Specifies a pin to be enabled by an upcoming commit() call.
+	**
+	** "port" is a PORT handle as obtained by a call to this LED driver's init() function.
+	** "pin" is one of the pins listed in the LED driver's "pins" array which additionally
+	** must have been allocated beforehand using the alloc() function above.
+	**
+	** Returns OK on success and ERR on failure.
+	*/
+	RC		(*enable)(PORT *port, char *pin);
+
+	/*
+	** Commits the changes made by calls to enable() before to the actual hardware.
+	**
+	** "port" is a PORT handle as obtained by a call to this LED driver's init() function.
+	**
+	** Returns OK on success and ERR on failure.
+	*/
+	RC		(*commit)(PORT *port);
+
+	/*
+	** Reset (i.e. turn off all pins).
+	**
+	** "port" is a PORT handle as obtained by a call to this LED driver's init() function.
+	**
+	** Returns OK on success and ERR on failure.
+	*/
+	RC		(*reset)(PORT *port);
+
+	/*
+	** Returns driver-internal error messages.
+	**
+	** "port" is a PORT handle as obtained by a call to this LED driver's init() function.
+	**
+	** Returns the last error message associated with the specified PORT handle.
+	*/
+	char		*(*errmsg)(PORT *port);
 } LEDDRIVER;
 
 #endif /* _RLEDS_LEDDRIVERS_H */
