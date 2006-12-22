@@ -10,28 +10,22 @@
 ** WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 ** or FITNESS FOR A PARTICULAR PURPOSE.
 **
-** Header file for generic interface handler
+** Header file for generic network interface handler
 */
 
-#ifndef IFH_GENERIC_H
-#define IFH_GENERIC_H
+#ifndef NETIFH_GENERIC_H
+#define NETIFH_GENERIC_H
 
 #ifdef HAVE_CONFIG_H
 #include "../../config.h"
 #endif
 
 #include "../common/base.h"
-#include "../common/ifhandlers.h"
-#include "../common/leds.h"
+#include "../common/netifhandlers.h"
 
-/* Since ifh_generic is part of the main rleds package, we use the same version
+/* Since netifh_generic is part of the main rleds package, we use the same version
    number */
-#define IFH_GENERIC_VERSION PACKAGE_VERSION
-
-/* Prototypes for the functions implemented in this interface handler */
-RC ifh_generic_init(LED *led);
-RC ifh_generic_power(LED *led);
-char *ifh_generic_errmsg(void);
+#define NETIFH_GENERIC_VERSION PACKAGE_VERSION
 
 /* Maximum length of buffer for error messages */
 #define MAX_ERRMSG_LEN 100
@@ -46,14 +40,24 @@ char *ifh_generic_errmsg(void);
 /* Length of buffer for reads from sysfs files */
 #define SYSFS_BUFLEN 20
 
-/* Our own management structure, hooked in at led->ifh_pdata */
-struct ifh_generic_pdata
+/* Our private NETIF structure */
+struct _netif
 {
-	char		*if_path,		/* Path of sysfs dir for interface */
-			*rx_path,		/* Path of sysfs file for rx_packets value */
-			*tx_path;		/* Path of sysfs file for tx_packets value */
-	long int 	rx_packets,		/* Last remembered rx_packets value */
-			tx_packets;		/* Last remembered tx_packets value */
+	char		*if_path;			/* Sysfs path for interface */
+	BOOL		up;				/* Remember whether interface is/was up */
+
+	char		*rx_path,			/* Sysfs path for rx_packets value */
+			*tx_path;			/* Sysfs path for tx_packets value */
+	long int 	rx_packets,			/* Last remembered rx_packets value */
+			tx_packets;			/* Last remembered tx_packets value */
+
+	char		errmsg[MAX_ERRMSG_LEN];		/* Error message */
 };
+
+/* Prototypes for the functions implemented in this interface handler */
+NETIF *netifh_generic_init(char *if_name);
+RC netifh_generic_shutdown(NETIF *netif);
+RC netifh_generic_col(NETIF *netif, LEDSTATE *ledstate);
+char *netifh_generic_errmsg(NETIF *netif);
 
 #endif
