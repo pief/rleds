@@ -17,6 +17,7 @@
 #include "../../config.h"
 #endif
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -32,8 +33,7 @@
 
 #include "../common/base.h"
 #include "../common/leddrivers.h"
-#include "../common/ifhandlers.h"
-#include "../common/leds.h"
+#include "../common/netifhandlers.h"
 
 #include "rleds.h"
 
@@ -49,10 +49,10 @@ char _errmsg[MAX_ERRMSG_LEN];
 
 /* Command line arguments */
 const char *_short_opts = "liV";
-static struct option _long_opts[] =
+struct option _long_opts[] =
 {
 	{ "led-drivers",	no_argument,		NULL,	'l' },
-	{ "interface-handlers",	no_argument,		NULL,	'i' },
+	{ "netif-handlers",	no_argument,		NULL,	'i' },
 	{ "help",		no_argument,		NULL,	'h' },
 	{ "usage",		no_argument,		NULL,	'h' },
 	{ "version",		no_argument,		NULL,	'V' },
@@ -68,20 +68,28 @@ const char *_help =
 
         "Options:\n"
 	"  -l, --led-drivers         list available LED drivers and their pin names\n"
-	"  -i, --interface-handlers  list available interface handlers\n"
+	"  -i, --netif-handlers      list available network interface handlers\n"
         "  -V, --version             print version and exit\n\n"
 
 	"<LEDSPEC> is a string of the format\n"
-	" <ifname>['['<interface handler>']']:<led driver>['['<device>']']:<prim>[,<sec>]\n"
+	" <netifname>['['<netifhandler>']']:<led driver>['['<device>']']:<prim>[,<sec>]\n"
 	"where <prim> and optionally <sec> define the pins of the LED driver at which the\n"
-	"(tri-color) LED for <ifname> is connected.\n\n"
+	"(tri-color) LED for <netifname> is connected.\n\n"
 
 	"Examples:\n"
 	" eth0:parallel:2 ppp0[ppp]:parallel[/dev/parport1]:3,4 eth3:serial[/dev/tty5]:1\n";
 
-/* LEDs */
+/* Dynamically created LED management array */
 LED *_leds;
 uint _num_leds;
+
+/* Additionally created array of pointers to LED structures that contains only one LED
+   structure for each PORT handle that was obtained. This is used so we don't call a
+   LED driver's shutdown function for a PORT handle twice.
+
+   An alternative approach would be to keep all PORT handles in a linked list. */
+LED **_ports;
+uint _num_ports;
 
 /*
 ** obj = load_shobj(path, ifstruct_name)
@@ -104,6 +112,8 @@ void *load_shobj(char *path)
 	void *dlobj, *ifstruct;
 	char *ifstruct_name, *p;
 	char *errmsg;
+
+	assert(path);
 
 	/* Attempt to open the specified file as a dynamic library */
 	dlobj = dlopen(path, RTLD_LAZY);
@@ -128,8 +138,8 @@ void *load_shobj(char *path)
 	if (errmsg)
 	{
 		snprintf(_errmsg, sizeof(_errmsg),
-		         "dlsym() on \"%s\" for \"%s\" failed: %s\n",
-		         path, ifstruct_name, errmsg);
+		         "dlsym() error in %s\n",
+		         errmsg);
 		return (void *)-1;
 	}
 
@@ -150,6 +160,8 @@ LEDDRIVER *load_leddriver(char *dir, char *leddriver_name)
 	char *path;
 	size_t len;
 	LEDDRIVER *leddrvr;
+
+	assert(dir && leddriver_name);
 
 	/* Compose full path */
 	len = strlen(dir) + 1 + strlen(LEDDRIVER_PREFIX) + strlen(leddriver_name) + 4;
@@ -179,45 +191,47 @@ LEDDRIVER *load_leddriver(char *dir, char *leddriver_name)
 }
 
 /*
-** ifh = load_ifhandler(dir, ifhandler_name)
+** netifh = load_netifhandler(dir, ifhandler_name)
 **
-** Attempts to load an interface handler in "dir" by its canonical name, e.g. "generic"
-** instead of "/foo/bar/ifh_generic.so".
+** Attempts to load an network interface handler in "dir" by its canonical name, e.g.
+** "generic" instead of "/foo/bar/netifh_generic.so".
 **
-** Returns a pointer to the interface handler's IFHANDLER structure or NULL on error, in
-** which case an error message can be found in _errmsg.
+** Returns a pointer to the network interface handler's NETIFHANDLER structure or NULL
+** on error, in which case an error message can be found in _errmsg.
 */
-IFHANDLER *load_ifhandler(char *dir, char *ifhandler_name)
+NETIFHANDLER *load_netifhandler(char *dir, char *netifhandler_name)
 {
 	char *path;
 	size_t len;
-	IFHANDLER *ifh;
+	NETIFHANDLER *netifh;
+
+	assert(dir && netifhandler_name);
 
 	/* Compose full path */
-	len = strlen(dir) + 1 + strlen(IFHANDLER_PREFIX) + strlen(ifhandler_name) + 4;
+	len = strlen(dir) + 1 + strlen(NETIFHANDLER_PREFIX) + strlen(netifhandler_name) + 4;
 	path = malloc(len);
 	if (!path)
 	{
 		snprintf(_errmsg, sizeof(_errmsg),
-		         "Not enough memory for complete path to interface handler \"%s\"!\n",
-		         ifhandler_name);
+		         "Not enough memory for complete path to network interface handler \"%s\"!\n",
+		         netifhandler_name);
 		return NULL;
 	}
-	snprintf(path, len, "%s/%s%s.so", dir, IFHANDLER_PREFIX, ifhandler_name);
+	snprintf(path, len, "%s/%s%s.so", dir, NETIFHANDLER_PREFIX, netifhandler_name);
 
 	/* Attemt to load as shared object */
-	ifh = (IFHANDLER *)load_shobj(path);
-	if (ifh == (void *)-1)
+	netifh = (NETIFHANDLER *)load_shobj(path);
+	if (netifh == (void *)-1)
 		return NULL;
-	if (!ifh)
+	if (!netifh)
 	{
 		snprintf(_errmsg, sizeof(_errmsg),
-		         "\"%s\" misses the defining IFHANDLER structure!\n",
-		         ifhandler_name);
+		         "\"%s\" misses the defining NETIFHANDLER structure!\n",
+		         netifhandler_name);
 		return NULL;
 	}
 
-	return ifh;
+	return netifh;
 }
 
 /*
@@ -229,8 +243,7 @@ IFHANDLER *load_ifhandler(char *dir, char *ifhandler_name)
 ** must export, "filter_func" is a callback function passed to scandir() and "print_func" is a
 ** function that is called to print the details of the shared object.
 **
-** This function is not meant to be called directly. Instead use macros such as
-** list_leddrivers() and list_ifhandlers() below.
+** Returns OK on success and ERR on failure.
 */
 RC list_shobjs(char *dir,
                char *name,
@@ -240,6 +253,8 @@ RC list_shobjs(char *dir,
 {
 	int i, count;
 	struct dirent **dirents;
+
+	assert(dir && name && struct_name && filter_func && print_func);
 
 	/* Scan the directory */
 	count = scandir(dir, &dirents, filter_func, alphasort);
@@ -321,13 +336,13 @@ int filter_leddrivers(const struct dirent *dirent)
 ** Print function for list_shobjs() above. Referenced by the list_leddrivers()
 ** macro below.
 */
-void print_leddriver(char *name,
-                     void *ifstruct)
+void print_leddriver(char *name, void *ifstruct)
 {
 	LEDDRIVER *leddrvr = (LEDDRIVER *)ifstruct;
-	char *leddrvr_name, *p;
-	PIN *pin;
+	char *leddrvr_name, **pin, *p;
 	char buf[PRINT_INDENT];
+
+	assert(name && ifstruct);
 
 	/* Compare API versions */
 	if (leddrvr->api_ver != LEDDRIVER_API_VER)
@@ -360,88 +375,67 @@ void print_leddriver(char *name,
 	fprintf(stdout,
 	        "%*cPins:",
 	        PRINT_INDENT, ' ');
-	for (pin = leddrvr->pins; pin->name; pin++)
+	for (pin = leddrvr->pins; *pin; pin++)
 	{
-		fprintf(stdout, " %s", pin->name);
+		fprintf(stdout, " %s", *pin);
 	}
 	fprintf(stdout, "\n");
 }
 
 /*
-** rc = list_leddrivers(dir)
+** Filter function for scandir() employed in list_netifhandlers() below.
 **
-** Lists all available LED drivers in PACKAGE_LIBDIR (shared library objects named
-** leddrvr_<name>.so and containing an LEDDRIVER structure named leddriver_<name>),
-** among with their help texts.
-**
-** Since this actually is a #define, 
-*/
-#define list_leddrivers(dir) \
- list_shobjs(dir, "LED drivers", "LEDDRIVER", filter_leddrivers, print_leddriver)
-
-/*
-** Filter function for scandir() employed in list_interfacehandlers() below.
-**
-** Returns 1 for filenames that begin with the prefix "ifh_" and 0 for other
+** Returns 1 for filenames that begin with the prefix "netifh_" and 0 for other
 ** filenames.
 */
-int filter_ifhandlers(const struct dirent *dirent)
+int filter_netifhandlers(const struct dirent *dirent)
 {
-	if (!strncmp(dirent->d_name, IFHANDLER_PREFIX, strlen(IFHANDLER_PREFIX)))
+	if (!strncmp(dirent->d_name, NETIFHANDLER_PREFIX, strlen(NETIFHANDLER_PREFIX)))
 		return 1;
 	else
 		return 0;
 }
 
 /*
-** Print function for list_shobjs() above. Referenced by the list_ifhandlers()
+** Print function for list_shobjs() above. Referenced by the list_netifhandlers()
 ** macro below.
 */
-void print_ifhandler(char *name,
-                     void *ifstruct)
+void print_netifhandler(char *name, void *ifstruct)
 {
-	IFHANDLER *ifh = (IFHANDLER *)ifstruct;
-	char *ifh_name, *p;
+	NETIFHANDLER *netifh = (NETIFHANDLER *)ifstruct;
+	char *netifh_name, *p;
 	char buf[PRINT_INDENT];
 
+	assert(name && ifstruct);
+
 	/* Compare API versions */
-	if (ifh->api_ver != IFHANDLER_API_VER)
+	if (netifh->api_ver != NETIFHANDLER_API_VER)
 	{
 		fprintf(stderr,
 		        "\"%s\": wrong API version (%d != ours: %d)\n",
-		        name, ifh->api_ver, IFHANDLER_API_VER);
+		        name, netifh->api_ver, NETIFHANDLER_API_VER);
 		return;
 	}
 
 	/* Create short name so the user knows what to specify in LEDSPECs */
-	ifh_name = strdup(name) + strlen(IFHANDLER_PREFIX);
-	p = strstr(ifh_name, ".so");
+	netifh_name = strdup(name) + strlen(NETIFHANDLER_PREFIX);
+	p = strstr(netifh_name, ".so");
 	if (p)
 		*p = '\0';
 
 	/* Print out information */
 	snprintf(buf, PRINT_INDENT,
 	         "- %s (v%s) ",
-	         ifh_name, ifh->ver);
+	         netifh_name, netifh->ver);
 
 	fprintf(stdout,
 	        "%-*s%s\n",
-	        PRINT_INDENT, buf, ifh->desc);
+	        PRINT_INDENT, buf, netifh->desc);
 
 	fprintf(stdout,
 	        "%*cTri-color LEDs: %s\n",
-	        PRINT_INDENT, ' ', ifh->tricol_desc);
+	        PRINT_INDENT, ' ', netifh->tricol_desc);
 }
-
-/*
-** rc = list_ifhandlers(dir)
-**
-** Lists all available interface handlers in PACKAGE_LIBDIR (shared library objects
-** named ifh_<name>.so and containing an IFHANDLER structure named ifh_<name>) together
-** with their help texts.
-*/
-#define list_ifhandlers(dir) \
- list_shobjs(dir, "interface handlers", "IFHANDLER", filter_ifhandlers, print_ifhandler)
 
 /*
 ** rc = split_ledspec(spec, &if_name, &ifh_name, &leddrvr_name, &device, &prim_pin, &sec_pin);
@@ -462,9 +456,7 @@ RC split_ledspec(char *spec,
 {
 	char *p;
 
-	/* Sanity check */
-	if (!spec || !if_name || !ifh_name || !leddrvr_name || !device || !prim_pin || !sec_pin)
-		return ERR;
+	assert(spec && if_name && ifh_name && leddrvr_name && device && prim_pin && sec_pin);
 
 	/* Chop spec using the double colon */
 	p = strdup(spec);
@@ -513,79 +505,6 @@ RC split_ledspec(char *spec,
 }
 
 /*
-** pin = alloc_pin(leddrvr, pin_name)
-**
-** Searches the specified LED driver's "pins" array for the pin "pin_name".
-**
-** Returns a pointer to the PIN structure on success or NULL on failure, in
-** which case an error message can be found in _errmsg.
-*/
-PIN *alloc_pin(LEDDRIVER *leddrvr, char *pin_name)
-{
-	PIN *pin;
-
-	for (pin = leddrvr->pins; pin->name; pin++)
-	{
-		if (!strcasecmp(pin_name, pin->name))
-		{
-			if (pin->allocated)
-			{
-				snprintf(_errmsg, sizeof(_errmsg),
-				         "pin \"%s\" specified twice",
-				         pin_name);
-				return NULL;
-			}
-
-			pin->allocated = TRUE;
-			return pin;				
-		}
-	}
-
-	snprintf(_errmsg, sizeof(_errmsg),
-	         "no such pin \"%s\"",
-	         pin_name);
-	return NULL;
-}
-
-/*
-** clear_leds()
-**
-** Instructs all LED drivers to clear their pins.
-**
-** Returns OK on success and ERR on failure.
-*/
-static RC clear_leds(void)
-{
-	int i;
-
-	for (i = 0; i < _num_leds; i++)
-	{
-		if (_leds[i].leddrvr->reset() != OK)
-		{
-			strncpy(_errmsg, _leds[i].leddrvr->errmsg(), sizeof(_errmsg)-1);
-			return ERR;
-		}
-	}
-
-	return OK;
-}
-
-/*
-** shutdown_handler(sig)
-**
-** Signal handler for all signals. Turns off all LEDs and instructs the main
-** routine to shut down.
-*/
-static void shutdown_handler(int sig)
-{
-	/* At this place we can safely ignore the return code */
-	(void)clear_leds();
-
-	_shutdown = 1;
-	signal(sig, shutdown_handler);
-}
-
-/*
 ** init(argc, argv);
 **
 ** Initialization routine.
@@ -593,7 +512,7 @@ static void shutdown_handler(int sig)
 ** exit() is used here instead of return codes since we not only decide on whether
 ** to exit or not but also on the return code.
 */
-static void init(int argc, char **argv)
+void init(int argc, char **argv)
 {
 	int c, opt_idx = 0, i;
 
@@ -609,7 +528,8 @@ static void init(int argc, char **argv)
 			/* -l, --led-drivers */
 			case 'l':
 			{
-				if (list_leddrivers(PACKAGE_LIBDIR) == OK)
+				if (list_shobjs(PACKAGE_LIBDIR, "LED drivers", "LEDDRIVER",
+				                filter_leddrivers, print_leddriver) == OK)
 					exit(0);
 				else
 					exit(1);
@@ -617,7 +537,8 @@ static void init(int argc, char **argv)
 			/* -i, --interface-handlers */
 			case 'i':
 			{
-				if (list_ifhandlers(PACKAGE_LIBDIR) == OK)
+				if (list_shobjs(PACKAGE_LIBDIR, "network interface handlers", "NETIFHANDLER",
+				                filter_netifhandlers, print_netifhandler) == OK)
 					exit(1);
 				else
 					exit(0);
@@ -647,7 +568,8 @@ static void init(int argc, char **argv)
 		}
 	}
 
-	/* Check that at least one LED structure was created */
+	/* The remaining arguments are assumed to be LED specifications. Check that at least
+	   one such definition was given. */
 	_num_leds = argc-optind;
 	if (_num_leds == 0)
 	{
@@ -657,26 +579,33 @@ static void init(int argc, char **argv)
 		exit(1);
 	}
 
-	/* The remaining arguments are assumed to be LED specifications, so we allocate
-	   memory for LED structures */
+	/* Allocate memory for LED structures and _ports array. _num_leds is used here
+	   as an initial upper bound for the size of the _ports array. We'll realloc() later. */
 	_leds = calloc(_num_leds, sizeof(LED));
-	if (!_leds)
+	_ports = calloc(_num_leds, sizeof(LED *));
+	if (!_leds || !_ports)
 	{
 		fprintf(stderr, "Could not allocate memory for LED structures!\n");
 		exit(1);
 	}
+	_num_ports = 0;
+
+	/* Install shutdown routine */
+	atexit(shutdown);	
 
 	/* Process LED specifications */
-	for (i=0; optind < argc ; optind++, i++)
+	for (i=0; optind<argc ; optind++, i++)
 	{
-		char *if_name, *ifh_name, *leddrvr_name, *device, *prim_pin, *sec_pin;
+		char *netifh_name, *leddrvr_name;
+		LED *led = &_leds[i];
+		int j;
 		BOOL pins_ok;
 
 		/* Split up LED specification */
 		if (split_ledspec(argv[optind],
-		                  &if_name, &ifh_name,
-		                  &leddrvr_name, &device,
-		                  &prim_pin, &sec_pin) != OK)
+		                  &led->netif_name, &netifh_name,
+		                  &leddrvr_name, &led->device_name,
+		                  &led->prim_pin, &led->sec_pin) != OK)
 		{
 			fprintf(stderr,
 			        "Invalid LED specification \"%s\"!\n",
@@ -687,53 +616,68 @@ static void init(int argc, char **argv)
 			exit(1);
 		}
 
-		/* We've got a default interface handler */
-		if (!ifh_name)
-			ifh_name = DEFAULT_IFH;
+		/* Use default name for network interface handler, if necessary */
+		if (!netifh_name)
+			netifh_name = DEFAULT_NETIFH;
 
-		/* Set up LED structure */
-		_leds[i].if_name  = if_name;
-		_leds[i].color    = LEDCOLOR_PRIM;
-
-		/* Load LED driver... */
-		_leds[i].leddrvr = load_leddriver(PACKAGE_LIBDIR, leddrvr_name);
-		if (!_leds[i].leddrvr)
+		/* Load specified network interface handler */
+		led->netifh = load_netifhandler(PACKAGE_LIBDIR, netifh_name);
+		if (!led->netifh)
 		{
 			fputs(_errmsg, stderr);
 			exit(1);
 		}
 
-		/* ...and interface handler */
-		_leds[i].ifh = load_ifhandler(PACKAGE_LIBDIR, ifh_name);
-		if (!_leds[i].ifh)
+		/* ...and initialize it */
+		led->netif = led->netifh->init(led->netif_name);
+		if (!led->netif)
+		{
+			fputs(led->netifh->errmsg(NULL), stderr);
+			exit(1);
+		}
+
+		/* Load specified LED driver */
+		led->leddrvr = load_leddriver(PACKAGE_LIBDIR, leddrvr_name);
+		if (!led->leddrvr)
 		{
 			fputs(_errmsg, stderr);
 			exit(1);
 		}
 
-		/* Initialize it */
-		if (_leds[i].ifh->init(&_leds[i]) != OK)
+		/* Check whether a PORT structure has already been initialized for
+		   this device */
+		for (j = 0; j < i; j++)
 		{
-			fputs(_leds[i].ifh->errmsg(), stderr);
-			exit(1);
+			LED *prev_led = &_leds[j];
+
+			if (strcasecmp(led->device_name, prev_led->device_name) == 0)
+				led->port = prev_led->port;
 		}
 
-		/* Check specified pins */
-		pins_ok = FALSE;
-		_leds[i].prim_pin = alloc_pin(_leds[i].leddrvr, prim_pin);
-		if (_leds[i].prim_pin)
+		/* If not, initialize LED driver for the specified device */
+		if (!led->port)
 		{
-			if (sec_pin)
+			led->port = led->leddrvr->init(led->device_name);
+			if (led->port)
 			{
-				if (_leds[i].ifh->colorctl)
-				{
-					_leds[i].sec_pin = alloc_pin(_leds[i].leddrvr, prim_pin);
-					if (_leds[i].sec_pin)
-						pins_ok = TRUE;
-				}
-				else
-					snprintf(_errmsg, sizeof(_errmsg),
-					         "interface handler does not support a secondary pin");
+				_ports[_num_ports] = led;
+				_num_ports++;
+			}
+		}
+		if (!led->port)
+		{
+			fputs(led->leddrvr->errmsg(NULL), stderr);
+			exit(1);
+		}
+
+		/* Try to allocate specified pins */
+		pins_ok = FALSE;
+		if (led->leddrvr->alloc(led->port, led->prim_pin) == OK)
+		{
+			if (led->sec_pin)
+			{
+				if (led->leddrvr->alloc(led->port, led->sec_pin) == OK)
+					pins_ok = TRUE;
 			}
 			else
 				pins_ok = TRUE;
@@ -742,81 +686,102 @@ static void init(int argc, char **argv)
 		{
 			fprintf(stderr,
 			        "Error in LED specification \"%s\": %s!\n",
-			        argv[optind], _errmsg);
+			        argv[optind], led->leddrvr->errmsg(led->port));
 			exit(1);
 		}
 
-		/* Finally initialize the LED driver */
-		if (_leds[i].leddrvr->init(device) != OK)
-		{
-			fputs(_leds[i].leddrvr->errmsg(), stderr);
-			exit(1);
-		}
-	}
-
-	/* Now that all structures are set up, clear all LEDs */
-	if (clear_leds() != OK)
-	{
-		fprintf(stderr,
-		        "Error clearing LEDs: %s!\n",
-		        _errmsg);
-		exit(1);
+		/* Finally, complete LED structure initialization */
+		led->ledstate = LEDSTATE_OFF;
 	}
 
 	/* Install signal handler */
-	signal(SIGHUP, shutdown_handler);
-	signal(SIGINT, shutdown_handler);
-	signal(SIGABRT, shutdown_handler);
-	signal(SIGTERM, shutdown_handler);
-	signal(SIGSEGV, shutdown_handler);
-	signal(SIGBUS, shutdown_handler);
-	signal(SIGUSR1, shutdown_handler);
-	signal(SIGUSR2, shutdown_handler);
+	signal(SIGHUP, sig_handler);
+	signal(SIGINT, sig_handler);
+	signal(SIGABRT, sig_handler);
+	signal(SIGTERM, sig_handler);
+	signal(SIGUSR1, sig_handler);
+	signal(SIGUSR2, sig_handler);
 }
 
 /*
-** Main code.
+** Shutdown function.
+*/
+void shutdown(void)
+{
+	int i;
+
+	/* Shutdown interface handlers and LED drivers */
+	for (i = 0; i < _num_ports; i++)
+	{
+		LED *led = _ports[i];
+
+		(void)_leds[i].leddrvr->reset(_leds[i].port);
+
+		led->netifh->shutdown(led->netif);
+		led->leddrvr->shutdown(led->port);
+	}
+}
+
+/*
+** sig_handler(sig)
+**
+** Signal handler for all signals. Turns off all LEDs and instructs the main
+** routine to shut down.
+*/
+void sig_handler(int sig)
+{
+	_shutdown = 1;
+	signal(sig, sig_handler);
+}
+
+
+/*
+** Main routine.
 */
 int main(int argc, char **argv)
 {
+	int i;
+
 	/* Initialize */
 	init(argc, argv);
 
 	/* Loop until someone presses CTRL-C */
 	while (!_shutdown)
 	{
-		int i;
-
 		/* Process all LEDs watched */
 		for (i = 0; i < _num_leds; i++)
 		{
+			RC rc = OK;
 			LED *led = &_leds[i];
 
-			/* Call this LED's interface handler's power control function
-			   and also its color control function, if defined and if a
-			   secondary pin was specified */
-			if (led->ifh->powerctl(led) != OK)
-				_shutdown = TRUE;
-			if (led->sec_pin)
-				led->ifh->colorctl(led);
+			fprintf(stderr, "calling led->netifh->col() with led->netif: %p led->ledstate: %p\n",
+			        led->netif, &led->ledstate);
 
-			fprintf(stderr, "LED for iface %s: up %d color %d (prim: %d, sec: %d, both: %d) led->prim_pin: %p sec_pin: %p\n",
-			        led->if_name, led->up, led->color, LEDCOLOR_PRIM, LEDCOLOR_SEC, LEDCOLOR_BOTH,
-			        led->prim_pin, led->sec_pin);
+			/* Call this LED's interface handler's LED color function */
+			if (led->netifh->col(led->netif, &led->ledstate) != OK)
+			{
+				fprintf(stderr,
+				        "Error examining interface \"%s\": %s!\n",
+				        _leds[i].netif_name, _leds[i].netifh->errmsg(_leds[i].netif));
+				_shutdown = TRUE;
+				break;
+			}
+
+			fprintf(stderr, ".");
 
 			/* Enable LED pins as necessary */
-			if (led->on)
+			if (led->ledstate == LEDSTATE_PRIM || led->ledstate == LEDSTATE_BOTH)
+				rc = led->leddrvr->enable(led->port, led->prim_pin);
+			if (led->sec_pin &&
+			    (led->ledstate == LEDSTATE_SEC || led->ledstate == LEDSTATE_BOTH))
+				rc |= led->leddrvr->enable(led->port, led->sec_pin);
+			if (rc != OK)
 			{
-				if (led->color & LEDCOLOR_PRIM)
-				{
-					fprintf(stderr, "enabling prim\n");
-					led->leddrvr->enable(led->prim_pin);
-				}
-				if (led->color & LEDCOLOR_SEC)
-				{
-					fprintf(stderr, "enabling sec\n");
-					led->leddrvr->enable(led->sec_pin);
-				}
+				fprintf(stderr,
+				        "Error enabling pins on \"%s\": %s!\n",
+				        led->device_name, led->leddrvr->errmsg(_leds[i].port));
+				_shutdown = TRUE;
+				break;
 			}
 		}
 
@@ -824,16 +789,15 @@ int main(int argc, char **argv)
 		   to the LED drivers */
 		for (i = 0; i < _num_leds; i++)
 		{
-			if (_leds[i].leddrvr->commit() != OK)
+			LED *led = &_leds[i];
+
+			if (led->leddrvr->commit(led->port) != OK)
 				_shutdown = TRUE;
 		}
 
 		/* Sleep for a while */
 		usleep(SLEEP_TIME);
 	}
-
-	/* At this place we can safely ignore the return code */
-	(void)clear_leds();
 
 	return 0;
 }
