@@ -17,6 +17,7 @@
 #include "../../config.h"
 #endif
 
+#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -31,23 +32,24 @@
 
 #include "leddrvr_parallel.h"
 
-/* Array of pins controlled by this driver */
-PIN leddrvr_parallel_pins[] =
-{
-	INIT_PIN("Strobe",	CONTROL_REG,	  1),
-	INIT_PIN("AutoFeed",	CONTROL_REG,	  2),
-	INIT_PIN("Init",	CONTROL_REG,	  4),
-	INIT_PIN("SelIn",	CONTROL_REG,	  8),
-	INIT_PIN("D0",		DATA_REG,	  1),
-	INIT_PIN("D1",		DATA_REG,	  2),
-	INIT_PIN("D2",		DATA_REG,	  4),
-	INIT_PIN("D3",		DATA_REG,	  8),
-	INIT_PIN("D4",		DATA_REG,	 16),
-	INIT_PIN("D5",		DATA_REG,	 32),
-	INIT_PIN("D6",		DATA_REG,	 64),
-	INIT_PIN("D7",		DATA_REG,	128),
-	END_PINS
+/* Pins supported by this driver */
+char *_pinnames[] = {
+	"Strobe",	"AutoFeed",	"Init",		"SelIn",
+	"D0",		"D1",		"D2",		"D3",
+	"D4",		"D5",		"D6",		"D7",
+	NULL
 };
+REG _pinregs[] = {
+	CONTROL_REG,	CONTROL_REG,	CONTROL_REG,	CONTROL_REG,
+	DATA_REG,	DATA_REG,	DATA_REG,	DATA_REG,
+	DATA_REG,	DATA_REG,	DATA_REG,	DATA_REG
+};
+uint _pinvals[] = {
+	1,		2,		4,		8,
+	1,		2,		4,		8,
+	16,		32,		64,		128
+};
+#define NUM_PINS (sizeof(_pinnames)/sizeof(char *))-1
 
 /* LEDDRIVER structure required by the main program */
 LEDDRIVER leddrvr_parallel =
@@ -58,133 +60,230 @@ LEDDRIVER leddrvr_parallel =
 	LEDDRVR_PARALLEL_VERSION,			/* Version of the LED driver */
 
 	DEFAULT_DEVICE,					/* Default device */
-	leddrvr_parallel_pins,				/* Array of pins controlled by this driver */
+	_pinnames,					/* Array of pins controlled by this driver */
 
 	leddrvr_parallel_init,				/* Init function */
-	leddrvr_parallel_enable,			/* Specifies a pin to be enabled */
-	leddrvr_parallel_commit,			/* Enable previously specified pins */
+	leddrvr_parallel_shutdown,			/* Shutdown function */
+	leddrvr_parallel_alloc,				/* Allocates a pin */
+	leddrvr_parallel_enable,			/* Set pin to be enabled */
+	leddrvr_parallel_commit,			/* Commit changes made by enable() to actual hardware */
 	leddrvr_parallel_reset,				/* Resets all pins */
 	leddrvr_parallel_errmsg				/* Returns driver-internal error messages */
 };
 
-/* The parallel port device */
-char *_parport_devname;
-int _parport_fd;
-
 /* Buffer for error messages */
 char _errmsg[MAX_ERRMSG_LEN];
 
-/* Storage for values to be written to control and data registers */
-int _cval, _dval;
-
-/* Init function */
-RC leddrvr_parallel_init(char *devname)
+/* Initialization function */
+PORT *leddrvr_parallel_init(char *dev_name)
 {
+	PORT *port;
+
 	/* If no device name was specified, use the default */
-	if (!devname)
-		devname = DEFAULT_DEVICE;
+	if (!dev_name)
+		dev_name = DEFAULT_DEVICE;
+
+	/* Initialize error message buffer */
+	*_errmsg = '\0';
+
+	/* Allocate PORT structure for this device */
+	port = malloc(sizeof(PORT));
+	if (port)
+		port->allocated = calloc(NUM_PINS, sizeof(BOOL));
+	if (!port || !port->allocated)
+	{
+		snprintf(_errmsg, sizeof(_errmsg),
+		         "Not enough memory for PORT structure!\n");
+		return NULL;
+	}
 
 	/* Open parallel port */
-	_parport_fd = open(devname, O_RDWR);
-	if (_parport_fd == -1)
+	port->fd = open(dev_name, O_RDWR);
+	if (port->fd == -1)
 	{
 		if (errno == ENOENT)
 		{
 			snprintf(_errmsg, sizeof(_errmsg),
 			         "Parallel port device \"%s\" does not exist -- check your system configuration!\n",
-			         devname);
+			         dev_name);
 		}
 		else
 		{
 			snprintf(_errmsg, sizeof(_errmsg),
 			         "Could not open parallel port device \"%s\":\n%s!\n",
-			         devname, strerror(errno));
+			         dev_name, strerror(errno));
 		}
 
-		return ERR;
+		return NULL;
 	}
 
-	/* Remember device name for error messages */
-	_parport_devname = strdup(devname);
-
-	/* Claim parallel port device */
-	if (ioctl(_parport_fd, PPCLAIM))
+	/* Claim port */
+	if (ioctl(port->fd, PPCLAIM))
 	{
 		snprintf(_errmsg, sizeof(_errmsg),
 		         "Could not claim parallel port device \"%s\":\n%s!\n",
-		         devname, strerror(errno));
+		         dev_name, strerror(errno));
+		return NULL;
+	}
+
+	/* Remember device name for error messages */
+	port->dev_name = strdup(dev_name);
+
+	fprintf(stderr, "Will initialize %s (%d) (allocated=%p)\n", port->dev_name, port->fd, port->allocated);
+
+	/* Finally, initialize it */
+	if (leddrvr_parallel_reset(port) != OK)
+	{
+		/* Preserve error message */
+		strncpy(_errmsg, port->errmsg, sizeof(_errmsg));
+
+		(void)leddrvr_parallel_shutdown(port);
+		return NULL;
+	}
+
+	return port;
+}
+
+/* Shutdown function */
+RC leddrvr_parallel_shutdown(PORT *port)
+{
+	assert(port);
+
+	/* Release port */
+	if (ioctl(port->fd, PPRELEASE))
+	{
+		snprintf(_errmsg, sizeof(_errmsg),
+		         "Could not release parallel port device \"%s\":\n%s!\n",
+		         port->dev_name, strerror(errno));
+		free(port);
 		return ERR;
 	}
 
-	/* And initialize */
-	return leddrvr_parallel_reset();
+	if (port->dev_name)
+		free(port->dev_name);
+	if (port->allocated)
+		free(port->allocated);
+	free(port);
+
+	return OK;
 }
 
-/* Set pins to be enabled */
-void leddrvr_parallel_enable(PIN *pin)
+/* Allocate the specified pin */
+RC leddrvr_parallel_alloc(PORT *port, char *pin)
 {
-	fprintf(stderr, "enable()\n");
+	char **p;
+	int i;
 
-	if (!pin)
-		return;
+	assert(port && port->allocated && pin);
 
-	fprintf(stderr, "enabling pin %s\n", pin->name);
-
-	switch (pin->reg)
+	/* Lookup specified pin */
+	for (i=0, p=_pinnames; i<NUM_PINS; i++, p++)
 	{
-		case CONTROL_REG:
-			_cval -= pin->val;
-			fprintf(stderr, "cval - %d = %d\n", pin->val, _cval);
-			break;
-		case DATA_REG:
-			_dval += pin->val;
-			fprintf(stderr, "dval + %d = %d\n", pin->val, _dval);
-			break;
-		default:
-			fprintf(stderr, "unknown pin->reg: %d\n", pin->reg);
+		if (strcasecmp(*p, pin) == 0)
+		{
+			/* Found, now check if available */
+			if (!port->allocated[i])
+			{
+				port->allocated[i] = TRUE;
+				return OK;
+			}
+
+			/* Nope, already in use */
+			snprintf(port->errmsg, sizeof(port->errmsg),
+			         "Pin \"%s\" of device \"%s\" already in use -- specified twice?\n",
+			         pin, port->dev_name);
+			return ERR;
+		}
 	}
+
+	/* Pin not found */
+	snprintf(port->errmsg, sizeof(port->errmsg),
+	         "The \"parallel\" LED driver does not know about a pin named \"%s\"!\n",
+	         pin);
+	return ERR;
 }
 
-/* Enable previously specified pins  */
-RC leddrvr_parallel_commit(void)
+/* Set pin to be enabled */
+RC leddrvr_parallel_enable(PORT *port, char *pin)
 {
-	fprintf(stderr, "Writing to control: %d, to data: %d\n", _cval, _dval);
+	char **p;
+	int i;
+
+	assert(port && port->allocated && pin);
+
+	/* Lookup specified pin */
+	for (i=0, p=_pinnames; i<NUM_PINS; i++, p++)
+	{
+		if (strcasecmp(*p, pin) == 0)
+		{
+			/* Found, now check if not allocated */
+			if (!port->allocated[i])
+			{
+				snprintf(port->errmsg, sizeof(port->errmsg),
+				         "Pin \"%s\" of device \"%s\" was not allocated!\n",
+				         pin, port->dev_name);
+				return ERR;
+			}
+
+			/* It was, so add the its regval to reg */
+			if (_pinregs[i] == CONTROL_REG)
+				port->cval -= _pinvals[i];
+			else
+				port->dval += _pinvals[i];
+
+			return OK;
+		}
+	}
+
+	/* Pin not found */
+	snprintf(port->errmsg, sizeof(port->errmsg),
+	         "The \"parallel\" LED driver does not know about a pin named \"%s\"!\n",
+	         pin);
+	return ERR;
+}
+
+/* Commit changes made by calls to enable() to actual hardware */
+RC leddrvr_parallel_commit(PORT *port)
+{
+	assert(port && port->fd);
+
+	fprintf(stderr, "[%s] Writing to control: %d, to data: %d\n", port->dev_name, port->cval, port->dval);
 
 	/* Write out values */
-	if (ioctl(_parport_fd, PPWCONTROL, &_cval) == -1 ||
-	    ioctl(_parport_fd, PPWDATA, &_dval)    == -1)
+	if (ioctl(port->fd, PPWCONTROL, &port->cval) == -1 ||
+	    ioctl(port->fd, PPWDATA, &port->dval)    == -1)
 	{
-		snprintf(_errmsg, sizeof(_errmsg),
+		snprintf(port->errmsg, sizeof(port->errmsg),
 		         "ioctl() on parallel port device \"%s\" failed:\n%s!\n",
-			 _parport_devname, strerror(errno));
+			 port->dev_name, strerror(errno));
 		return ERR;
 	}
 
 	/* Reset values */
-	_cval = CONTROL_INIT;
-	_dval = DATA_INIT;
-
-	fprintf(stderr, "Reset cval to %d and dval to %d\n", _cval, _dval);
+	port->cval = CONTROL_INIT;
+	port->dval = DATA_INIT;
 
 	return OK;
 }
 
 /* Reset (i.e. turn off all pins) */
-RC leddrvr_parallel_reset(void)
+RC leddrvr_parallel_reset(PORT *port)
 {
-	/* Reset values... */
-	_cval = CONTROL_INIT;
-	_dval = DATA_INIT;
+	assert(port && port->fd);
 
-	fprintf(stderr, "Reset cval to %d and dval to %d\n", _cval, _dval);
+	/* Reset values... */
+	port->cval = CONTROL_INIT;
+	port->dval = DATA_INIT;
+
+	fprintf(stderr, "[%s/%d] Reset cval to %d and dval to %d\n", port->dev_name, port->fd, port->cval, port->dval);
 
 	/* ..and write out */
-	if (ioctl(_parport_fd, PPWCONTROL, &_cval) == -1 ||
-	    ioctl(_parport_fd, PPWDATA, &_dval)    == -1)
+	if (ioctl(port->fd, PPWCONTROL, port->cval) == -1 ||
+	    ioctl(port->fd, PPWDATA, port->dval)    == -1)
 	{
-		snprintf(_errmsg, sizeof(_errmsg),
+		snprintf(port->errmsg, sizeof(port->errmsg),
 		         "ioctl() on parallel port device \"%s\" failed:\n%s!\n",
-			 _parport_devname, strerror(errno));
+			 port->dev_name, strerror(errno));
 		return ERR;
 	}
 
@@ -192,7 +291,10 @@ RC leddrvr_parallel_reset(void)
 }
 
 /* Returns LED driver-internal error messages */
-char *leddrvr_parallel_errmsg(void)
+char *leddrvr_parallel_errmsg(PORT *port)
 {
-	return _errmsg;
+	if (port)
+		return port->errmsg;
+	else
+		return _errmsg;
 }
