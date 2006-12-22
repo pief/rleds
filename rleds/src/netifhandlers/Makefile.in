@@ -30,11 +30,11 @@ LDFLAGS = @LDFLAGS@ -shared -g
 
 ###############################################################################
 
-TARGETS = ifh_generic.so
+TARGETS = netifh_generic.so
 
 all: $(TARGETS)
 
-ifh_generic.so: ../common/base.h ../common/ifhandlers.h ../common/leds.h ifh_generic.h
+netifh_generic.so: ../common/base.h ../common/netifhandlers.h netifh_generic.h
 
 %.so: %.o
 	$(CC) $(LDFLAGS) -o $@ $<
