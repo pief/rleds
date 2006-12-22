@@ -35,7 +35,7 @@ TARGETS = rleds
 
 all: $(TARGETS)
 
-rleds.o: ../common/base.h ../common/leddrivers.h ../common/ifhandlers.h ../common/leds.h
+rleds.o: ../common/base.h ../common/leddrivers.h ../common/netifhandlers.h
 
 rleds: rleds.o
 	$(CC) $(LDFLAGS) -o $@ $<
