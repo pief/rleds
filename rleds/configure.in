@@ -28,5 +28,5 @@ if test "x$GCC" = "xyes"; then
 fi
 
 # Generate output
-AC_CONFIG_FILES([Makefile src/leddrivers/Makefile src/ifhandlers/Makefile src/rleds/Makefile])
+AC_CONFIG_FILES([Makefile src/leddrivers/Makefile src/netifhandlers/Makefile src/rleds/Makefile])
 AC_OUTPUT

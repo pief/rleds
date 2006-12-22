@@ -28,7 +28,7 @@ LIBS = @LIBS@ -ldl
 
 ###############################################################################
 
-SUBDIRS = src/leddrivers src/ifhandlers src/rleds
+SUBDIRS = src/leddrivers src/netifhandlers src/rleds
 
 all:
 	@for dir in $(SUBDIRS); do \
